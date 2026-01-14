@@ -34,7 +34,7 @@ RUN KERNEL_VERSION=$(cat /kernel-version.txt) && \
 # Base Image
 FROM ghcr.io/ublue-os/ucore-hci:stable
 RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
-    --mount=type=bind,from=builder,source=/kernel-version.txt,target=/ctx/kernel_version.txt \
+    --mount=type=bind,from=builder,source=/kernel-version.txt,target=/ctx/kernel-version.txt \
     --mount=type=bind,from=builder,source=/home/asustor-platform-driver,target=/ctx/asustor-platform-driver \
     --mount=type=cache,dst=/var/cache \
     --mount=type=cache,dst=/var/log \
