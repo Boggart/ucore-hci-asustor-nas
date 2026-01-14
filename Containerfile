@@ -2,39 +2,48 @@
 FROM scratch AS ctx
 COPY build_files /
 
+# Needs to be set to the Fedora version on CoreOS stable stream, as it is our base image.
+# In a script, you can set this using:
+#   BUILDER_VERSION=$(curl -s "https://builds.coreos.fedoraproject.org/streams/stable.json" | jq -r '.architectures.x86_64.artifacts.metal.release' | cut -d '.' -f 1)
+ARG BUILDER_VERSION=39
+
+FROM ghcr.io/ublue-os/ucore-hci:stable as kernel-query
+#We can't use the `uname -r` as it will pick up the host kernel version
+RUN rpm -qa kernel --queryformat '%{VERSION}-%{RELEASE}.%{ARCH}' > /kernel-version.txt
+
+FROM registry.fedoraproject.org/fedora:${BUILDER_VERSION} as builder
+COPY --from=kernel-query /kernel-version.txt /kernel-version.txt
+
+RUN dnf install -y \
+    git \
+    make
+
+# Get the kernel-headers
+RUN KERNEL_VERSION=$(cat /kernel-version.txt) && \
+    KERNEL_XYZ=$(echo ${KERNEL_VERSION} | cut -d"-" -f1) && \
+    KERNEL_DISTRO=$(echo ${KERNEL_VERSION} | cut -d"-" -f2 | cut -d"." -f-2) && \
+    KERNEL_ARCH=$(echo ${KERNEL_VERSION} | cut -d"-" -f2 | cut -d"." -f3) && \
+    dnf install -y \
+    https://kojipkgs.fedoraproject.org//packages/kernel/${KERNEL_XYZ}/${KERNEL_DISTRO}/${KERNEL_ARCH}/kernel-${KERNEL_VERSION}.rpm \
+    https://kojipkgs.fedoraproject.org//packages/kernel/${KERNEL_XYZ}/${KERNEL_DISTRO}/${KERNEL_ARCH}/kernel-core-${KERNEL_VERSION}.rpm \
+    https://kojipkgs.fedoraproject.org//packages/kernel/${KERNEL_XYZ}/${KERNEL_DISTRO}/${KERNEL_ARCH}/kernel-modules-${KERNEL_VERSION}.rpm \
+    https://kojipkgs.fedoraproject.org//packages/kernel/${KERNEL_XYZ}/${KERNEL_DISTRO}/${KERNEL_ARCH}/kernel-modules-core-${KERNEL_VERSION}.rpm \
+    https://kojipkgs.fedoraproject.org//packages/kernel/${KERNEL_XYZ}/${KERNEL_DISTRO}/x86_64/kernel-devel-${KERNEL_VERSION}.rpm
+
+WORKDIR /home
+RUN git clone https://github.com/Boggart/ucore-hci-asustor-nas
+WORKDIR  /home/ucore-hci-asustor-nas
+RUN KERNEL_VERSION=$(cat /kernel-version.txt) && \
+    TARGET=${KERNEL_VERSION} make all
+
 # Base Image
-FROM ghcr.io/ublue-os/bazzite:stable
-
-## Other possible base images include:
-# FROM ghcr.io/ublue-os/bazzite:latest
-# FROM ghcr.io/ublue-os/bluefin-nvidia:stable
-# 
-# ... and so on, here are more base images
-# Universal Blue Images: https://github.com/orgs/ublue-os/packages
-# Fedora base image: quay.io/fedora/fedora-bootc:41
-# CentOS base images: quay.io/centos-bootc/centos-bootc:stream10
-
-### [IM]MUTABLE /opt
-## Some bootable images, like Fedora, have /opt symlinked to /var/opt, in order to
-## make it mutable/writable for users. However, some packages write files to this directory,
-## thus its contents might be wiped out when bootc deploys an image, making it troublesome for
-## some packages. Eg, google-chrome, docker-desktop.
-##
-## Uncomment the following line if one desires to make /opt immutable and be able to be used
-## by the package manager.
-
-# RUN rm /opt && mkdir /opt
-
-### MODIFICATIONS
-## make modifications desired in your image and install packages by modifying the build.sh script
-## the following RUN directive does all the things required to run "build.sh" as recommended.
-
+FROM ghcr.io/ublue-os/ucore-hci:stable
 RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
+    --mount=type=bind,from=builder,source=/kernel-version.txt,target=/ctx/kernel_version.txt \
+    --mount=type=bind,from=builder,source=/home/ucore-hci-asustor-nas,target=/ctx/asustor-kmod \
     --mount=type=cache,dst=/var/cache \
     --mount=type=cache,dst=/var/log \
     --mount=type=tmpfs,dst=/tmp \
     /ctx/build.sh
-    
-### LINTING
-## Verify final image and contents are correct.
+COPY --from=builder /home/ucore-hci-asustor-nas/
 RUN bootc container lint
