@@ -2,16 +2,11 @@
 FROM scratch AS ctx
 COPY build_files /
 
-# Needs to be set to the Fedora version on CoreOS stable stream, as it is our base image.
-# In a script, you can set this using:
-#   BUILDER_VERSION=$(curl -s "https://builds.coreos.fedoraproject.org/streams/stable.json" | jq -r '.architectures.x86_64.artifacts.metal.release' | cut -d '.' -f 1)
-ARG BUILDER_VERSION=39
-
 FROM ghcr.io/ublue-os/ucore-hci:stable as kernel-query
 #We can't use the `uname -r` as it will pick up the host kernel version
 RUN rpm -qa kernel --queryformat '%{VERSION}-%{RELEASE}.%{ARCH}' > /kernel-version.txt
 
-FROM registry.fedoraproject.org/fedora:${BUILDER_VERSION} as builder
+FROM registry.fedoraproject.org/fedora:43 as builder
 COPY --from=kernel-query /kernel-version.txt /kernel-version.txt
 
 RUN dnf install -y \
@@ -45,5 +40,4 @@ RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     --mount=type=cache,dst=/var/log \
     --mount=type=tmpfs,dst=/tmp \
     /ctx/build.sh
-COPY --from=builder /home/ucore-hci-asustor-nas/
 RUN bootc container lint
